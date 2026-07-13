@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "double-pendulum-jaxrl"
+version = "0.1.0"
+description = "Pure-JAX double-pendulum RL environment (swing-up + balance) with selectable joint actuation."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "jax>=0.4.28",
+    "jaxlib>=0.4.28",
+    "flax>=0.8",
+    "gymnax>=0.0.8",
+    "rejax>=0.1.0",
+    "optax>=0.2",
+    "numpy>=1.24",
+    "matplotlib>=3.7",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+# Install on a machine with an NVIDIA GPU with:  pip install -e ".[cuda]"
+cuda = ["jax[cuda12]>=0.4.28"]
+
+[project.scripts]
+dpjaxrl-train = "scripts.train:main"
+dpjaxrl-play = "scripts.play:main"
+
+[tool.setuptools]
+packages = ["double_pendulum_jaxrl"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
