@@ -85,6 +85,7 @@ class DoublePendulum(environment.Environment[EnvState, EnvParams]):
             time=state.time + 1,
         )
 
+        # state.last_action is the action applied on the previous step (a is the current one).
         reward = self._reward(new_state, a, state.last_action, params)
         done = self.is_terminal(new_state, params)
         info = {
@@ -159,28 +160,37 @@ class DoublePendulum(environment.Environment[EnvState, EnvParams]):
         prev_action: jax.Array,
         params: EnvParams,
     ) -> jax.Array:
-        # w_up*tip_height drives swing-up; gated velocity/control/angle penalties + a
-        # smooth bonus handle catch/balance; the action-rate penalty keeps the control
-        # signal smooth. Angle errors are wrapped so there is no 2*pi discontinuity.
+        # LQR-style reward: a dense height term drives the swing-up, a quadratic reward
+        # pulls the pose to upright, a quadratic penalty discourages actuation, a sharp
+        # bonus rewards catching the balance, and a gated penalty damps joint velocity
+        # only near the target. Angle errors are wrapped so there is no 2*pi discontinuity.
         up = dynamics.tip_height(state.theta1, state.theta2, params)
         e1 = jnp.arctan2(jnp.sin(state.theta1 - jnp.pi), jnp.cos(state.theta1 - jnp.pi))
         e2 = jnp.arctan2(jnp.sin(state.theta2), jnp.cos(state.theta2))
         ang_err2 = e1**2 + e2**2
         vel = state.omega1**2 + state.omega2**2
         ctrl = jnp.sum(jnp.square(action))
-        rate = jnp.sum(jnp.square(action - prev_action))
 
-        # Gate the stabilisation penalties by uprightness: ~0 at the bottom (so the agent
-        # is free to pump up angular velocity to swing up), ~1 near the top.
-        gate = ((up + 1.0) / 2.0) ** params.stab_power
-        penalties = gate * (
-            params.w_vel * vel + params.w_ctrl * ctrl + params.w_ang * ang_err2
-        )
-        smooth = params.w_smooth * rate
-        bonus = params.w_bonus * jnp.exp(
-            -(params.bonus_ang_coef * ang_err2 + params.bonus_vel_coef * vel)
-        )
-        return params.w_up * up - penalties - smooth + bonus
+        # 1. Dense height reward over the whole swing (-1 hanging, +1 upright): this is the
+        #    term that guides the energy-pumping swing-up instead of hanging at the bottom.
+        r_height = params.w_height * up
+        # 2. Quadratic reward for reaching / holding the upright configuration.
+        r_upright = -params.w_upright * ang_err2
+        # 3. Quadratic penalty on actuation.
+        r_ctrl = -params.w_ctrl * ctrl
+        # 4. Extra reward for swinging the tip above the horizontal line (tip_height > 0).
+        r_swing = params.w_swing * jnp.maximum(up, 0.0)
+        # 5. Sharp, localized attractor so that catching and holding the balance pays off.
+        r_bonus = params.w_bonus * jnp.exp(-params.bonus_coef * ang_err2)
+        # 6. Joint-velocity penalty, gated to switch on only near the target so the agent
+        #    can still pump angular velocity freely during the swing-up.
+        near = jnp.exp(-params.near_coef * ang_err2)
+        r_vel = -near * params.w_vel * vel
+        # 7. Control-smoothness penalty: discourage fast changes in the control command
+        #    from one step to the next, which suppresses chattering of the actuators.
+        r_smooth = -params.w_smooth * jnp.sum(jnp.square(action - prev_action))
+
+        return r_height + r_upright + r_ctrl + r_swing + r_bonus + r_vel + r_smooth
 
     # ------------------------------------------------------------------ #
     # spaces / metadata

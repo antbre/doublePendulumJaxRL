@@ -126,6 +126,11 @@ tests/              # pytest suite
 - `TOP_ONLY` and `BOTTOM_ONLY` are genuinely hard **underactuated** swing-up problems; they get a
   larger default timestep budget and may still need hyperparameter tuning (in `default_ppo_config`
   in `double_pendulum_jaxrl/train.py`) to fully stabilise inverted.
-- Reward weights (`w_height`, `w_bonus`, `w_vel`, `w_smooth`, gate thresholds) and physical
-  parameters live in `EnvParams`
-  (`config.py`) and can be tuned without touching the dynamics.
+- The reward is an LQR-style shaping (see the formula in `EnvParams`): a dense `w_height`
+  swing-up driver, a quadratic `w_upright` upright reward, a quadratic `w_ctrl` actuation
+  penalty, a `w_swing` bonus above horizontal, a sharp `w_bonus` attractor at the target, and
+  a `w_vel` joint-velocity penalty gated to activate only near the target. Weights are kept
+  O(0.1-1) on purpose — rejax normalises observations and advantages but *not* rewards, so an
+  oversized reward makes the critic targets unfittable and training stalls.
+- Reward weights and physical parameters live in `EnvParams` (`config.py`) and can be tuned
+  without touching the dynamics.

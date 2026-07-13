@@ -79,29 +79,83 @@ def test_torque_routing():
     assert float(tau_bottom[0]) == 0.0 and float(tau_bottom[1]) != 0.0
 
 
-def test_gated_reward_and_action_smoothness():
-    """Swing-up height is rewarded when low; action jumps are penalised everywhere."""
+def _state(theta1, theta2=0.0, omega1=0.0, omega2=0.0):
+    return EnvState(
+        theta1=jnp.asarray(theta1),
+        theta2=jnp.asarray(theta2),
+        omega1=jnp.asarray(omega1),
+        omega2=jnp.asarray(omega2),
+        last_action=jnp.zeros(2),
+        time=0,
+    )
+
+
+def _r(env, params, state, action, prev=None):
+    """Evaluate the reward, defaulting prev_action = action (zero action-rate penalty)."""
+    prev = action if prev is None else prev
+    return float(env._reward(state, action, prev, params))
+
+
+def test_reward_upright_and_actuation():
+    """Upright is rewarded over hanging; actuation is penalised quadratically."""
     env = DoublePendulum(ActuationMode.BOTH)
     params = env.default_params
-    hanging = EnvState(
-        theta1=0.0,
-        theta2=0.0,
-        omega1=0.0,
-        omega2=0.0,
-        last_action=jnp.zeros(2),
-        time=0,
-    )
-    upright = EnvState(
-        theta1=jnp.pi,
-        theta2=0.0,
-        omega1=0.0,
-        omega2=0.0,
-        last_action=jnp.zeros(2),
-        time=0,
-    )
-    hanging_r = env._reward(hanging, jnp.zeros(2), jnp.zeros(2), params)
-    upright_r = env._reward(upright, jnp.zeros(2), jnp.zeros(2), params)
-    smooth_r = env._reward(hanging, jnp.zeros(2), jnp.zeros(2), params)
-    jerky_r = env._reward(hanging, jnp.ones(2), jnp.zeros(2), params)
-    assert float(upright_r) > float(hanging_r)
-    assert float(jerky_r) < float(smooth_r)
+    hanging_r = _r(env, params, _state(0.0), jnp.zeros(2))
+    upright_r = _r(env, params, _state(jnp.pi), jnp.zeros(2))
+    # Upright (quadratic angle-error reward is 0 at the target) beats hanging.
+    assert upright_r > hanging_r
+    # Actuation costs: driving the joints is worse than doing nothing at the same state.
+    idle_r = _r(env, params, _state(jnp.pi), jnp.zeros(2))
+    active_r = _r(env, params, _state(jnp.pi), jnp.ones(2))
+    assert active_r < idle_r
+
+
+def test_reward_dense_height_below_horizontal():
+    """The dense height term rewards progress even below horizontal (guides the swing-up).
+
+    Both states are below the horizontal line, so the max(tip_height, 0) swing bonus is
+    zero for each; the higher one must still score better thanks to the dense w_height term.
+    """
+    env = DoublePendulum(ActuationMode.BOTH)
+    params = env.default_params
+    low_r = _r(env, params, _state(0.1), jnp.zeros(2))   # tip_height ~ -1 (near bottom)
+    high_r = _r(env, params, _state(1.2), jnp.zeros(2))  # tip_height ~ -0.36, still < 0
+    assert high_r > low_r
+
+
+def test_reward_swing_bonus_above_horizontal():
+    """The swing bonus only rewards the tip once it rises above the horizontal line."""
+    env = DoublePendulum(ActuationMode.BOTH)
+    params = env.default_params
+    # tip_height < 0 (below horizontal) gets no swing bonus; tip_height > 0 does.
+    below_r = _r(env, params, _state(0.3), jnp.zeros(2))
+    above_r = _r(env, params, _state(jnp.pi - 0.3), jnp.zeros(2))
+    assert above_r > below_r
+
+
+def test_reward_velocity_penalty_gated_near_target():
+    """Joint velocity is penalised near the target but essentially free far from it."""
+    env = DoublePendulum(ActuationMode.BOTH)
+    params = env.default_params
+    # Near the target: adding velocity should noticeably reduce the reward.
+    near_still = _r(env, params, _state(jnp.pi), jnp.zeros(2))
+    near_fast = _r(env, params, _state(jnp.pi, omega1=3.0, omega2=3.0), jnp.zeros(2))
+    near_drop = near_still - near_fast
+    # Far from the target (hanging): the same velocity is barely penalised (gate ~0).
+    far_still = _r(env, params, _state(0.0), jnp.zeros(2))
+    far_fast = _r(env, params, _state(0.0, omega1=3.0, omega2=3.0), jnp.zeros(2))
+    far_drop = far_still - far_fast
+    assert near_drop > 0.0
+    assert near_drop > far_drop
+
+
+def test_reward_action_rate_penalty():
+    """A jump in the control from the previous step is penalised (anti-chatter)."""
+    env = DoublePendulum(ActuationMode.BOTH)
+    params = env.default_params
+    state = _state(jnp.pi)
+    action = jnp.array([1.0, -1.0])
+    # Same state and action: holding the previous action steady beats a large jump.
+    steady_r = _r(env, params, state, action, prev=action)          # |a - a_prev| = 0
+    jerky_r = _r(env, params, state, action, prev=-action)          # large step change
+    assert jerky_r < steady_r
