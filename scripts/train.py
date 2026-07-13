@@ -5,6 +5,10 @@ Examples
 --------
     python scripts/train.py --mode both
     python scripts/train.py --mode top --timesteps 5_000_000 --seed 1
+    # save a resumable checkpoint every 500k steps:
+    python scripts/train.py --mode both --checkpoint-every 500000
+    # continue an earlier run for 1M more steps:
+    python scripts/train.py --resume checkpoints/both_step500000.pkl --timesteps 1000000
 """
 
 from __future__ import annotations
@@ -32,6 +36,12 @@ def main() -> None:
                         help="Where to save the learning-curve PNG.")
     parser.add_argument("--eval-freq", type=int, default=None,
                         help="Env steps between progress prints/evals (default 25000).")
+    parser.add_argument("--checkpoint-every", type=int, default=None,
+                        help="Save a resumable checkpoint every N env steps "
+                             "(written next to --out as <stem>_step<N>.pkl).")
+    parser.add_argument("--resume", type=str, default=None,
+                        help="Resume training from this checkpoint. --mode is taken "
+                             "from it; --timesteps then means ADDITIONAL steps.")
     parser.add_argument("--quiet", action="store_true",
                         help="Suppress the streaming per-eval progress lines.")
     args = parser.parse_args()
@@ -45,17 +55,28 @@ def main() -> None:
     if args.eval_freq is not None:
         overrides["eval_freq"] = args.eval_freq
 
-    print(f"Training mode={mode.name} seed={args.seed} ...")
+    # Default the intermediate-checkpoint path to the final --out location.
+    out = args.out or os.path.join("checkpoints", f"{args.mode}.pkl")
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+
+    if not args.resume:
+        print(f"Training mode={mode.name} seed={args.seed} ...")
     algo, train_state, evaluation, config = train(
-        mode, seed=args.seed, verbose=not args.quiet, **overrides
+        mode,
+        seed=args.seed,
+        verbose=not args.quiet,
+        checkpoint_every=args.checkpoint_every,
+        checkpoint_path=out,
+        resume_from=args.resume,
+        **overrides,
     )
+    # On resume the effective mode comes from the checkpoint, not --mode.
+    mode = ActuationMode(int(algo.env.actuation_mode))
 
     _lengths, returns = evaluation
     print(f"Final mean return: {float(returns[-1].mean()):.2f}")
 
-    out = args.out or os.path.join("checkpoints", f"{args.mode}.pkl")
-    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
-    save_checkpoint(out, mode, config, train_state)
+    save_checkpoint(out, mode, config, train_state, evaluation=evaluation)
     print(f"Saved checkpoint -> {out}")
 
     curve = args.curve or os.path.join("checkpoints", f"{args.mode}_curve.png")

@@ -49,6 +49,23 @@ python scripts/train.py --mode top --timesteps 5000000 --seed 1
 This writes a policy checkpoint to `checkpoints/<mode>.pkl` and a learning-curve PNG to
 `checkpoints/<mode>_curve.png`.
 
+### Periodic checkpoints & resuming
+
+Save a full, **resumable** checkpoint every N env steps, then continue later:
+
+```bash
+# checkpoint every 500k steps -> checkpoints/both_step<N>.pkl (+ final checkpoints/both.pkl)
+python scripts/train.py --mode both --checkpoint-every 500000
+
+# continue an earlier run for 1M ADDITIONAL steps (mode is taken from the checkpoint)
+python scripts/train.py --resume checkpoints/both_step500000.pkl --timesteps 1000000
+```
+
+Checkpoints store the full rejax train state (actor, critic, optimizer, RNG, step
+count) so resuming continues the exact optimization — as well as the actor params that
+`play.py` needs. Since the training loop is a single jitted call, periodic checkpointing
+runs it in Python-level chunks of `--checkpoint-every` steps.
+
 ### Following progress during training
 
 The whole PPO loop is compiled into one `jax.jit` call, so a plain `print` can't report
@@ -109,5 +126,6 @@ tests/              # pytest suite
 - `TOP_ONLY` and `BOTTOM_ONLY` are genuinely hard **underactuated** swing-up problems; they get a
   larger default timestep budget and may still need hyperparameter tuning (in `default_ppo_config`
   in `double_pendulum_jaxrl/train.py`) to fully stabilise inverted.
-- Reward weights (`w_up`, `w_vel`, `w_ctrl`) and physical parameters live in `EnvParams`
+- Reward weights (`w_height`, `w_bonus`, `w_vel`, `w_smooth`, gate thresholds) and physical
+  parameters live in `EnvParams`
   (`config.py`) and can be tuned without touching the dynamics.

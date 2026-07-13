@@ -127,3 +127,25 @@ def tip_height(theta1: Array, theta2: Array, p: EnvParams) -> Array:
     """Height of the pendulum tip, normalised to [-1, 1] (+1 == fully upright)."""
     _, _, _, y2 = link_positions(theta1, theta2, p)
     return y2 / (p.l1 + p.l2)
+
+
+def upright_tip_position(p: EnvParams) -> tuple[Array, Array]:
+    """Cartesian tip position at the upright target ``(theta1, theta2) = (pi, 0)``."""
+    return link_positions(jnp.pi, 0.0, p)[2:4]
+
+
+def tip_distance(theta1: Array, theta2: Array, p: EnvParams) -> Array:
+    """Euclidean distance from the tip to the upright target position."""
+    x2, y2 = link_positions(theta1, theta2, p)[2:4]
+    x_t, y_t = upright_tip_position(p)
+    return jnp.sqrt((x2 - x_t) ** 2 + (y2 - y_t) ** 2)
+
+
+def upright_energy(p: EnvParams) -> Array:
+    """Total mechanical energy at the upright rest equilibrium (the swing-up target)."""
+    return total_energy(jnp.array([jnp.pi, 0.0, 0.0, 0.0]), p)
+
+
+def hanging_energy(p: EnvParams) -> Array:
+    """Potential energy at the hanging rest equilibrium."""
+    return potential_energy(jnp.array([0.0, 0.0, 0.0, 0.0]), p)

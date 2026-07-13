@@ -28,6 +28,8 @@ def main() -> None:
                         help="Save animation to this path (.gif/.mp4). Omit to show live.")
     parser.add_argument("--diagnostics", type=str, default=None,
                         help="Save a diagnostics plot to this PNG path.")
+    parser.add_argument("--stochastic", action="store_true",
+                        help="Sample actions (noisy) instead of the deterministic mean.")
     args = parser.parse_args()
 
     ckpt = args.checkpoint
@@ -38,7 +40,7 @@ def main() -> None:
 
     print(f"JAX devices: {jax.devices()}")
     print(f"Loading policy from {ckpt} ...")
-    act, env, env_params = load_policy(ckpt)
+    act, env, env_params = load_policy(ckpt, deterministic=not args.stochastic)
 
     traj = rollout(act, env, env_params, seed=args.seed)
     print(f"Episode return: {traj['reward'].sum():.2f} | "

@@ -72,10 +72,38 @@ class EnvParams:
     max_torque: float = 5.0   # per actuated joint
 
     # --- episode ---
-    max_steps_in_episode: int = 500
+    max_steps_in_episode: int = 1000
 
     # --- reward weights ---
-    w_up: float = 1.0         # reward for tip height (upright = +1)
-    w_vel: float = 0.02       # penalty on angular velocity magnitude
-    w_ctrl: float = 0.002     # penalty on control effort
-    reset_noise: float = 0.05  # std of initial angle/velocity perturbation
+    #   e1 = wrap(theta1 - pi), e2 = wrap(theta2), vel = w1^2 + w2^2, ctrl = |a|^2
+    #   gate = ((tip_height + 1) / 2) ** stab_power     # ~0 at bottom, ~1 near the top
+    #   reward = w_up * tip_height
+    #            - gate * (w_vel*vel + w_ctrl*ctrl + w_ang*(e1^2 + e2^2))
+    #            - w_smooth * |a - a_prev|^2
+    #            + w_bonus * exp(-(bonus_ang_coef*(e1^2 + e2^2) + bonus_vel_coef*vel))
+    #
+    # This is the version that was verified to swing up AND catch upright (it still
+    # oscillates/chatters around the equilibrium, to be addressed separately):
+    #  * w_up * tip_height drives the energy-pumping swing-up.
+    #  * the gated velocity/control/angle penalties activate near the top so the agent
+    #    catches and regulates upright instead of swinging through.
+    #  * the smooth bonus provides a sharp basin at the exact equilibrium.
+    #  * the action-rate term suppresses chattering on the control signal.
+    w_up: float = 1.0
+    w_vel: float = 0.02
+    w_ctrl: float = 0.002
+    w_ang: float = 1.0
+    w_smooth: float = 0.1
+    stab_power: float = 3.0
+    w_bonus: float = 5.0
+    bonus_ang_coef: float = 5.0
+    bonus_vel_coef: float = 0.1
+
+    # --- reset / reference-state initialization (RSI) ---
+    reset_noise: float = 0.05  # std of the near-bottom start perturbation
+    # A fraction of episodes start near the *upright* target instead of hanging, so
+    # the agent gets direct practice catching/balancing at the top (set 0.0 for pure
+    # swing-up-from-bottom). Top starts are spread over a band of angles/velocities.
+    p_start_top: float = 0.2
+    top_angle_std: float = 0.5
+    top_vel_std: float = 2.0

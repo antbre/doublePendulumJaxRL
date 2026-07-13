@@ -48,3 +48,15 @@ def test_tip_height_extremes():
     p = EnvParams()
     assert float(dynamics.tip_height(jnp.pi, 0.0, p)) == 1.0   # fully upright
     assert float(dynamics.tip_height(0.0, 0.0, p)) == -1.0     # hanging straight down
+
+
+def test_tip_distance_extremes():
+    p = EnvParams()
+    assert float(dynamics.tip_distance(jnp.pi, 0.0, p)) == 0.0
+    assert float(dynamics.tip_distance(0.0, 0.0, p)) == 2.0 * (p.l1 + p.l2)
+
+
+def test_upright_energy_is_potential_only():
+    p = EnvParams()
+    up = jnp.array([jnp.pi, 0.0, 0.0, 0.0])
+    assert float(dynamics.upright_energy(p)) == float(dynamics.potential_energy(up, p))

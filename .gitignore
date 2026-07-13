@@ -6,5 +6,7 @@ build/
 dist/
 checkpoints/*.pkl
 checkpoints/*.png
+media/*.gif
+media/*.png
 *.gif
 *.mp4
