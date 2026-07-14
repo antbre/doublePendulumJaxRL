@@ -50,7 +50,14 @@ def save_checkpoint(
         "global_step": int(train_state.global_step),
     }
     if payload["normalize_observations"]:
-        rms = train_state.rms_state
+        # rejax >=0.1 uses obs_rms_state; older versions used rms_state.
+        rms = getattr(train_state, "obs_rms_state", None) or getattr(
+            train_state, "rms_state", None
+        )
+        if rms is None:
+            raise AttributeError(
+                "train_state has normalize_observations=True but no obs RMS state"
+            )
         payload["obs_rms"] = {
             "mean": jax.device_get(rms.mean),
             "var": jax.device_get(rms.var),
@@ -110,7 +117,7 @@ def load_policy(path: str, deterministic: bool = True):
     if not deterministic:
         fake_ts = SimpleNamespace(actor_ts=SimpleNamespace(params=params))
         if normalize:
-            fake_ts.rms_state = SimpleNamespace(
+            fake_ts.obs_rms_state = SimpleNamespace(
                 mean=mean, var=jnp.asarray(rms["var"]), count=jnp.asarray(rms["count"])
             )
         return algo.make_act(fake_ts), algo.env, algo.env_params
