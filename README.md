@@ -73,15 +73,39 @@ mid-run. Training instead **streams a progress line at every evaluation** (host-
 `jax.debug.callback`):
 
 ```
-step=     16384  return= -618.63 +/-  60.64  ep_len= 500.0
-step=     32768  return= -591.47 +/-  50.85  ep_len= 500.0
+step=    131072  return=-1054.22 +/- 220.09  ep_len=1000.0
+step=   1048576  return= -186.56 +/- 157.95  ep_len=1000.0
 ```
+
+(Return climbs from roughly −1500 at the bottom toward positive values once the policy
+swings up and balances; see `## Notes on training` for the reward scale.)
 
 - Use `--eval-freq N` to print more/less often (it is rounded up to a multiple of
   `num_envs * num_steps`; default `eval_freq` is 25000).
 - Use `--quiet` to turn the streaming lines off.
 - The full curve is always saved as a PNG at the end regardless.
 - To watch hardware utilisation alongside it: `htop` (CPU) or `nvidia-smi -l 1` (GPU).
+
+## Pretrained baselines
+
+Ready-to-run baseline policies for all three modes are checked into `checkpoints/`, so you can
+visualize a swing-up without training anything first:
+
+| Checkpoint               | Mode          | Learning curve                 |
+|--------------------------|---------------|--------------------------------|
+| `checkpoints/both.pkl`   | `BOTH`        | `checkpoints/both_curve.png`   |
+| `checkpoints/top.pkl`    | `TOP_ONLY`    | `checkpoints/top_curve.png`    |
+| `checkpoints/bottom.pkl` | `BOTTOM_ONLY` | `checkpoints/bottom_curve.png` |
+
+Each `.pkl` holds the full rejax train state (actor, critic, optimizer, RNG, step count), so it
+can be rendered with `play.py`, resumed with `--resume`, or used as a warm start; the matching
+`_curve.png` is the training-return curve. Play one directly:
+
+```bash
+python scripts/play.py --mode both          # loads checkpoints/both.pkl
+```
+
+Re-running `scripts/train.py --mode <mode>` overwrites the corresponding files with a fresh run.
 
 ## Test / visualize a trained policy
 
@@ -91,7 +115,10 @@ python scripts/play.py --checkpoint checkpoints/top.pkl        # live window
 ```
 
 `play.py` rolls out one episode, animates the pendulum, and (optionally) saves a diagnostics plot
-of angles, velocities, torques, tip height and reward.
+of angles, velocities, torques, tip height and reward. By default it evaluates the **deterministic
+mean** policy; pass `--stochastic` to sample from the policy instead (rejax's training-time policy
+has std ≈ 1, so the stochastic rollout looks like bang-bang chatter — the mean is the real
+learned controller).
 
 ## Run the tests
 
@@ -101,8 +128,9 @@ pytest
 ```
 
 Covers energy conservation of the unactuated pendulum (RK4), mass-matrix positive-definiteness,
-gravity equilibria, the gymnax API contract, `jit`/`vmap`-ability, determinism, and torque routing
-per actuation mode.
+gravity equilibria, the gymnax API contract, `jit`/`vmap`-ability, determinism, torque routing
+per actuation mode, and the reward-shaping terms (upright/actuation, dense height driver, swing
+bonus, gated velocity penalty, and the action-rate anti-chatter penalty).
 
 ## Project layout
 
@@ -128,9 +156,16 @@ tests/              # pytest suite
   in `double_pendulum_jaxrl/train.py`) to fully stabilise inverted.
 - The reward is an LQR-style shaping (see the formula in `EnvParams`): a dense `w_height`
   swing-up driver, a quadratic `w_upright` upright reward, a quadratic `w_ctrl` actuation
-  penalty, a `w_swing` bonus above horizontal, a sharp `w_bonus` attractor at the target, and
-  a `w_vel` joint-velocity penalty gated to activate only near the target. Weights are kept
-  O(0.1-1) on purpose — rejax normalises observations and advantages but *not* rewards, so an
-  oversized reward makes the critic targets unfittable and training stalls.
+  penalty, a `w_swing` bonus above horizontal, a sharp `w_bonus` attractor at the target, a
+  `w_vel` joint-velocity penalty gated to activate only near the target, and a `w_smooth`
+  control-smoothness penalty on `|a - a_prev|^2` that suppresses actuator chatter. Weights are
+  kept O(0.1–1) on purpose — rejax normalises observations and advantages but *not* rewards, so
+  an oversized reward makes the critic targets unfittable and training stalls.
+- `max_torque` (per joint) defaults to `10.0`: still well below the ~20–30 N·m of gravity torque
+  (so the swing-up requires energy pumping), but large enough that the swing-up is *discoverable*
+  — `5.0` was too weak and training stalled at the bottom.
+- Training uses reference-state initialization: a fraction of episodes (`p_start_top`) start near
+  the upright target so the agent gets direct practice catching/balancing; evaluation always
+  starts from the bottom, so the reported return is an honest swing-up-from-hanging measure.
 - Reward weights and physical parameters live in `EnvParams` (`config.py`) and can be tuned
   without touching the dynamics.
